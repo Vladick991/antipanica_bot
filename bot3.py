@@ -1,51 +1,62 @@
 import logging
+import random
+import datetime
+import sqlite3
+
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
     InlineKeyboardMarkup,
-    InlineKeyboardButton
+    InlineKeyboardButton,
 )
 from telegram.ext import (
-    Updater,
+    ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    Filters,
     CallbackQueryHandler,
-    CallbackContext
+    ContextTypes,
+    filters,
 )
 
-import sqlite3
-import random
-import datetime
+# ------------------ LOGGING ------------------
 
-# ---------------- ЛОГИ ----------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOKEN = "YOUR_TOKEN"
+TOKEN = "YOUR_TOKEN_HERE"
 
-# ---------------- БАЗА ДАННЫХ ----------------
+
+# ------------------ DATABASE ------------------
 
 def init_db():
     conn = sqlite3.connect("emotions.db")
     c = conn.cursor()
     c.execute(
-        "CREATE TABLE IF NOT EXISTS mood (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, mood TEXT, date TEXT)"
+        """
+        CREATE TABLE IF NOT EXISTS mood (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            mood TEXT,
+            date TEXT
+        )
+        """
     )
     conn.commit()
     conn.close()
 
-def save_mood(user_id, mood):
+
+async def save_mood(user_id, mood):
     conn = sqlite3.connect("emotions.db")
     c = conn.cursor()
     c.execute(
         "INSERT INTO mood (user_id, mood, date) VALUES (?, ?, ?)",
-        (user_id, mood, str(datetime.date.today()))
+        (user_id, mood, str(datetime.date.today())),
     )
     conn.commit()
     conn.close()
 
-# ---------------- МЕНЮ ----------------
+
+# ------------------ KEYBOARDS ------------------
 
 main_menu = ReplyKeyboardMarkup(
     [
@@ -55,23 +66,24 @@ main_menu = ReplyKeyboardMarkup(
         ["📚 Экзамен", "📝 GAD-7"],
         ["📬 Письмо себе", "⏰ Напоминания"],
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
 )
 
 mood_menu = ReplyKeyboardMarkup(
     [
         ["😊 Хорошо", "😐 Так себе", "😟 Плохо", "😭 Очень плохо"],
-        ["⬅ Назад"]
+        ["⬅ Назад"],
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
 )
 
-# ---------------- ТЕКСТЫ ----------------
+
+# ------------------ TEXT CONTENT ------------------
 
 BREATHING = (
     "🌬 *Техника дыхания 4–6*\n\n"
-    "Вдох на 4 секунды\n"
-    "Выдох на 6 секунд\n"
+    "Вдох — 4 секунды\n"
+    "Выдох — 6 секунд\n"
     "Повтори 6 раз 🕊"
 )
 
@@ -89,14 +101,14 @@ GROUNDING = (
 MEDITATIONS = [
     "🧘 *Медитация: 60 секунд тишины*\nЗакрой глаза. Просто дыши.",
     "🌊 Представь море. Волна накатывает — волна уходит…",
-    "🔥 Представь тёплое мягкое пламя внутри груди."
+    "🔥 Представь тёплое мягкое пламя внутри груди.",
 ]
 
 MOTIVATION = [
     "✨ Ты справишься.",
     "💪 Ты сильнее, чем твоя тревога.",
     "🔥 Ты — не свои страхи.",
-    "🌱 Сегодня ты уже сделал шаг вперёд."
+    "🌱 Сегодня ты уже сделал шаг вперёд.",
 ]
 
 EXAM_TIPS = (
@@ -117,7 +129,7 @@ SOS_TEXT = (
     "Ты справишься 🤍"
 )
 
-# ---------------- GAD-7 ----------------
+# ------------------ GAD-7 ------------------
 
 GAD7_QUESTIONS = [
     "1. Чувствовали ли вы нервозность, тревожность или на взводе?",
@@ -126,189 +138,210 @@ GAD7_QUESTIONS = [
     "4. Было ли трудно расслабиться?",
     "5. Были ли настолько беспокойны, что трудно сидеть на месте?",
     "6. Легко ли вы раздражались или расстраивались?",
-    "7. Чувствовали ли страх, будто что-то ужасное может случиться?"
+    "7. Чувствовали ли страх, будто что-то ужасное может случиться?",
 ]
 
-def gad7_start(update: Update, context: CallbackContext):
-    context.user_data["gad7"] = {"index": 0, "score": 0}
-    update.message.reply_text(
-        "📝 *Тест GAD-7: определение уровня тревожности*\n\n"
-        "Ответь оценкой от 0 до 3:\n"
-        "0 — никогда\n1 — несколько дней\n2 — более половины дней\n3 — почти каждый день",
-        parse_mode="Markdown"
-    )
-    update.message.reply_text(GAD7_QUESTIONS[0])
 
-def gad7_process(update: Update, context: CallbackContext):
+async def gad7_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["gad7"] = {"index": 0, "score": 0}
+
+    await update.message.reply_text(
+        "📝 *Тест GAD-7: уровень тревожности*\n\n"
+        "Ответь оценкой 0–3:\n"
+        "0 — никогда\n1 — иногда\n2 — часто\n3 — почти всегда",
+        parse_mode="Markdown",
+    )
+    await update.message.reply_text(GAD7_QUESTIONS[0])
+
+
+async def gad7_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "gad7" not in context.user_data:
         return False
 
     try:
-        answer = int(update.message.text)
-        if answer not in [0, 1, 2, 3]:
+        value = int(update.message.text)
+        if value not in [0, 1, 2, 3]:
             raise ValueError
     except:
-        update.message.reply_text("Ответ должен быть числом 0–3.")
+        await update.message.reply_text("Ответ должен быть 0–3.")
         return True
 
-    context.user_data["gad7"]["score"] += answer
+    context.user_data["gad7"]["score"] += value
     context.user_data["gad7"]["index"] += 1
-
     idx = context.user_data["gad7"]["index"]
 
     if idx < 7:
-        update.message.reply_text(GAD7_QUESTIONS[idx])
+        await update.message.reply_text(GAD7_QUESTIONS[idx])
         return True
+
+    score = context.user_data["gad7"]["score"]
+    del context.user_data["gad7"]
+
+    if score <= 4:
+        level = "Минимальная тревожность"
+    elif score <= 9:
+        level = "Лёгкая тревожность"
+    elif score <= 14:
+        level = "Средняя тревожность"
     else:
-        score = context.user_data["gad7"]["score"]
-        del context.user_data["gad7"]
+        level = "Тяжёлая тревожность"
 
-        if score <= 4:
-            level = "Минимальная тревожность"
-        elif score <= 9:
-            level = "Лёгкая тревожность"
-        elif score <= 14:
-            level = "Средняя тревожность"
-        else:
-            level = "Тяжёлая тревожность"
+    await update.message.reply_text(
+        f"Твой результат: *{score}* баллов.\n{level} 🤍",
+        parse_mode="Markdown",
+    )
+    return True
 
-        update.message.reply_text(
-            f"Твой результат: *{score}* баллов.\n{level} 🤍",
-            parse_mode="Markdown"
-        )
-        return True
 
-# ---------------- НАПОМИНАНИЯ ----------------
+# ------------------ REMINDERS ------------------
 
-def reminder_handler(update: Update, context: CallbackContext):
+async def reminder_job(context: ContextTypes.DEFAULT_TYPE):
+    chat_id = context.job.data["chat_id"]
+    what = context.job.data["what"]
+    await context.bot.send_message(chat_id, f"⏰ Напоминание: {what}!")
+
+
+async def process_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
 
     if not text.startswith("напомнить"):
         return False
 
-    # формат: "напомнить вода 60"
     parts = text.split()
     if len(parts) != 3:
-        update.message.reply_text("Формат: напомнить <что> <минуты>")
+        await update.message.reply_text("Формат: напомнить <что> <минуты>")
         return True
 
     what = parts[1]
     try:
         minutes = int(parts[2])
     except:
-        update.message.reply_text("Минуты должны быть числом.")
+        await update.message.reply_text("Минуты должны быть числом.")
         return True
 
     context.job_queue.run_once(
-        lambda c: update.message.reply_text(f"⏰ Напоминание: {what}!"),
-        minutes * 60
+        reminder_job,
+        when=minutes * 60,
+        data={"chat_id": update.message.chat_id, "what": what},
     )
 
-    update.message.reply_text(f"Ок! Напомню через {minutes} минут 🤍")
+    await update.message.reply_text(f"Ок! Напомню через {minutes} минут 🤍")
     return True
 
-# ---------------- ПИСЬМО СЕБЕ ----------------
 
-def save_letter(update: Update, context: CallbackContext):
-    if context.user_data.get("letter_mode"):
-        with open("letter.txt", "w", encoding="utf-8") as f:
-            f.write(update.message.text)
-        update.message.reply_text("Письмо сохранено! Отправлю через 7 дней 💌")
-        context.user_data["letter_mode"] = False
-        return True
-    return False
+# ------------------ LETTER TO SELF ------------------
 
-# ---------------- ОБРАБОТЧИК МЕНЮ ----------------
+async def process_letter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("letter_mode"):
+        return False
 
-def menu(update: Update, context: CallbackContext):
+    with open("letter.txt", "w", encoding="utf-8") as f:
+        f.write(update.message.text)
+
+    await update.message.reply_text("Письмо сохранено! Отправлю через 7 дней 💌")
+    context.user_data["letter_mode"] = False
+    return True
+
+
+# ------------------ MENU HANDLER ------------------
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     if text == "🌬 Дыхание":
-        update.message.reply_text(BREATHING, parse_mode="Markdown")
+        await update.message.reply_text(BREATHING, parse_mode="Markdown")
 
     elif text == "🧘 Медитация":
-        update.message.reply_text(random.choice(MEDITATIONS), parse_mode="Markdown")
+        await update.message.reply_text(random.choice(MEDITATIONS), parse_mode="Markdown")
 
     elif text == "🧩 Grounding":
-        update.message.reply_text(GROUNDING, parse_mode="Markdown")
+        await update.message.reply_text(GROUNDING, parse_mode="Markdown")
 
     elif text == "⚡ SOS":
-        update.message.reply_text(SOS_TEXT, parse_mode="Markdown")
+        await update.message.reply_text(SOS_TEXT, parse_mode="Markdown")
 
     elif text == "📒 Дневник" or text == "😊 Настроение":
-        update.message.reply_text("Как ты себя чувствуешь?", reply_markup=mood_menu)
+        await update.message.reply_text("Как ты себя чувствуешь?", reply_markup=mood_menu)
 
     elif text == "⬅ Назад":
-        update.message.reply_text("Меню:", reply_markup=main_menu)
+        await update.message.reply_text("Меню:", reply_markup=main_menu)
 
     elif text in ["😊 Хорошо", "😐 Так себе", "😟 Плохо", "😭 Очень плохо"]:
-        save_mood(update.message.from_user.id, text)
-        update.message.reply_text("Записал 🤍", reply_markup=main_menu)
+        await save_mood(update.message.from_user.id, text)
+        await update.message.reply_text("Записал 🤍", reply_markup=main_menu)
 
     elif text == "📚 Экзамен":
-        update.message.reply_text(
+        await update.message.reply_text(
             EXAM_TIPS,
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⚡ Мотивация!", callback_data="motivate")]]
             ),
-            parse_mode="Markdown"
+            parse_mode="Markdown",
         )
 
     elif text == "📝 GAD-7":
-        gad7_start(update, context)
+        await gad7_start(update, context)
 
     elif text == "⏰ Напоминания":
-        update.message.reply_text(
+        await update.message.reply_text(
             "Напиши: *напомнить <что> <минуты>*\n\nПример: `напомнить вода 30`",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
         )
 
     elif text == "📬 Письмо себе":
-        update.message.reply_text("Напиши своё письмо, я сохраню его 💌")
+        await update.message.reply_text("Напиши своё письмо 💌")
         context.user_data["letter_mode"] = True
 
-# ---------------- INLINE ----------------
 
-def inline_handler(update: Update, context: CallbackContext):
-    q = update.callback_query
-    q.answer()
+# ------------------ INLINE BUTTONS ------------------
 
-    if q.data == "motivate":
-        q.edit_message_text("⚡ " + random.choice(MOTIVATION))
+async def inline_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-# ---------------- ГЛАВНЫЙ ОБРАБОТЧИК ----------------
+    if query.data == "motivate":
+        await query.edit_message_text("⚡ " + random.choice(MOTIVATION))
 
-def text_router(update: Update, context: CallbackContext):
+
+# ------------------ TEXT ROUTER ------------------
+
+async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # GAD-7
-    if gad7_process(update, context):
+    if await gad7_process(update, context):
         return
 
-    # Reminder
-    if reminder_handler(update, context):
+    # Reminders
+    if await process_reminder(update, context):
         return
 
-    # Письмо
-    if save_letter(update, context):
+    # Letter to self
+    if await process_letter(update, context):
         return
 
-    # Меню
-    menu(update, context)
+    # Menu
+    await menu(update, context)
 
-# ---------------- MAIN ----------------
+
+# ------------------ START COMMAND ------------------
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Я АнтиПаника 🤍", reply_markup=main_menu)
+
+
+# ------------------ MAIN ------------------
 
 def main():
     init_db()
 
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
+    app = ApplicationBuilder().token(TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("Привет!", reply_markup=main_menu)))
-    dp.add_handler(CallbackQueryHandler(inline_handler))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_router))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(inline_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
 
-    updater.start_polling()
-    updater.idle()
+    app.run_polling()
+
 
 if __name__ == "__main__":
     main()
