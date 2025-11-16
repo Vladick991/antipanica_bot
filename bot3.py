@@ -23,7 +23,7 @@ from telegram.ext import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOKEN = "YOUR_TOKEN_HERE"
+TOKEN = "8473801558:AAFmRkmPU8vJmcmQET5bATmD_NVwc9LWi2Q"
 
 
 # ------------------ DATABASE ------------------
